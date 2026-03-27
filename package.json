@@ -1,0 +1,21 @@
+{
+  "name": "aika-ai-shindan-bot",
+  "version": "1.0.0",
+  "description": "あいかコンサル AI活用レベル診断Bot",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^9.3.0",
+    "express": "^4.18.2",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
