@@ -332,6 +332,10 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # suppress default logs
 
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
