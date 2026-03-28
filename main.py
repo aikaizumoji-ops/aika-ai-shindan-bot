@@ -144,9 +144,10 @@ def reply(reply_token, messages):
         method="POST",
     )
     try:
-        urllib.request.urlopen(req)
+        res = urllib.request.urlopen(req)
+        print(f"[REPLY OK] status={res.status}", flush=True)
     except Exception as e:
-        print(f"Reply error: {e}")
+        print(f"[REPLY ERROR] {e}", flush=True)
 
 def make_question_msg(q):
     items = [
@@ -334,9 +335,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"AI\xe8\xaa\xba\xe6\x96\xadBot \xe7\xa8\xbc\xe5\x83\x8d\xe4\xb8\xad \xe2\x9c\x85")
+        self.wfile.write(b"AI Bot running OK")
 
     def do_POST(self):
+        print(f"[POST] path={self.path}", flush=True)
         if self.path not in ("/webhook", "/callback"):
             self.send_response(404)
             self.end_headers()
@@ -345,18 +347,23 @@ class Handler(BaseHTTPRequestHandler):
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
         signature = self.headers.get("X-Line-Signature", "")
+        print(f"[SIG] len={len(body)} sig={signature[:20]}...", flush=True)
 
         if not verify_signature(body, signature):
+            print(f"[403] signature mismatch", flush=True)
             self.send_response(403)
             self.end_headers()
             return
 
         try:
             data = json.loads(body.decode("utf-8"))
-            for event in data.get("events", []):
+            events = data.get("events", [])
+            print(f"[EVENTS] count={len(events)}", flush=True)
+            for event in events:
+                print(f"[EVENT] type={event.get('type')} userId={event.get('source',{}).get('userId','?')[:8]}", flush=True)
                 handle_event(event)
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"[ERROR] {e}", flush=True)
 
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
