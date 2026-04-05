@@ -303,7 +303,10 @@ def handle_event(event):
             session["step"] = 1
         else:
             if session["step"] == 0:
-                reply(reply_token, {"type": "text", "text": "「診断スタート」と送ると\n無料AI活用レベル診断ができます！🤖\n\nぜひ試してみてください✨"})
+                reply(reply_token, [
+                    {"type": "text", "text": "ご登録ありがとうございます🌿\n\n【環境再生型造園 オンライン実践講座】は\n現在準備中です。\n\n🚧 Coming Soon 🚧\n\n講座の詳細・募集開始のご案内は\nこちらのLINEで最速でお届けします。\n\n楽しみにお待ちください✨"},
+                    {"type": "text", "text": "💡 AI活用レベル診断もできます！\n「診断スタート」と送ってみてください🤖"},
+                ])
 
     elif event_type == "postback":
         session = get_session(user_id)
