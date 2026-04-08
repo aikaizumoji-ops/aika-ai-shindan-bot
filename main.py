@@ -6,6 +6,7 @@ import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs
 import urllib.request
+from datetime import datetime, timedelta
 
 CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
 CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
@@ -118,16 +119,191 @@ def get_level(score):
             return lv
     return LEVELS[0]
 
+# ─── 無料相談 予約データ ─────────────────────────────────────────
+WEEKDAY_JP = ["月", "火", "水", "木", "金", "土", "日"]
+
+TIME_SLOTS = [
+    "10:00〜11:00",
+    "11:00〜12:00",
+    "12:00〜13:00",
+    "13:00〜14:00",
+    "14:00〜15:00",
+    "15:00〜16:00",
+    "19:00〜20:00",
+    "20:00〜21:00",
+]
+
+# CEO通知用 — 予約をPush通知するユーザーID（LINE Developersで確認）
+CEO_USER_ID = os.environ.get("CEO_LINE_USER_ID", "")
+LINE_PUSH_API = "https://api.line.me/v2/bot/message/push"
+
+def push_message(to_user_id, messages):
+    """Reply APIではなくPush APIで任意のタイミングに送信"""
+    if not to_user_id:
+        return
+    if not isinstance(messages, list):
+        messages = [messages]
+    body = json.dumps({"to": to_user_id, "messages": messages}).encode("utf-8")
+    req = urllib.request.Request(
+        LINE_PUSH_API,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {CHANNEL_ACCESS_TOKEN}",
+        },
+        method="POST",
+    )
+    try:
+        res = urllib.request.urlopen(req)
+        print(f"[PUSH OK] status={res.status}", flush=True)
+    except Exception as e:
+        print(f"[PUSH ERROR] {e}", flush=True)
+
+def get_next_7days():
+    """直近7日間の日付リストを生成（JST想定）"""
+    today = datetime.now() + timedelta(hours=9)  # UTC→JST
+    days = []
+    for i in range(1, 8):
+        d = today + timedelta(days=i)
+        wd = WEEKDAY_JP[d.weekday()]
+        label = f"{d.month}/{d.day}（{wd}）"
+        value = d.strftime("%Y-%m-%d")
+        days.append({"label": label, "value": value})
+    return days
+
+def make_date_picker_msg():
+    """日付選択のQuick Replyメッセージ"""
+    days = get_next_7days()
+    items = [
+        {
+            "type": "action",
+            "action": {
+                "type": "postback",
+                "label": d["label"],
+                "data": f"booking_date={d['value']}",
+                "displayText": d["label"],
+            },
+        }
+        for d in days
+    ]
+    return {
+        "type": "text",
+        "text": "📅 ご都合の良い日をお選びください",
+        "quickReply": {"items": items},
+    }
+
+def make_time_picker_msg():
+    """時間帯選択のQuick Replyメッセージ"""
+    items = [
+        {
+            "type": "action",
+            "action": {
+                "type": "postback",
+                "label": slot,
+                "data": f"booking_time={slot}",
+                "displayText": slot,
+            },
+        }
+        for slot in TIME_SLOTS
+    ]
+    return {
+        "type": "text",
+        "text": "⏰ ご希望の時間帯をお選びください",
+        "quickReply": {"items": items},
+    }
+
+def make_booking_confirm_flex(date_str, time_slot):
+    """予約確定のFlexメッセージ"""
+    d = datetime.strptime(date_str, "%Y-%m-%d")
+    wd = WEEKDAY_JP[d.weekday()]
+    display_date = f"{d.year}年{d.month}月{d.day}日（{wd}）"
+    return {
+        "type": "flex",
+        "altText": f"無料相談のご予約：{display_date} {time_slot}",
+        "contents": {
+            "type": "bubble",
+            "size": "mega",
+            "header": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {"type": "text", "text": "✅ ご予約を受け付けました", "weight": "bold", "size": "lg", "align": "center", "color": "#ffffff"},
+                ],
+                "backgroundColor": "#06C755",
+                "paddingAll": "16px",
+            },
+            "body": {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {"type": "text", "text": "無料相談", "weight": "bold", "size": "xl", "align": "center", "margin": "md"},
+                    {"type": "separator", "margin": "lg"},
+                    {
+                        "type": "box",
+                        "layout": "vertical",
+                        "contents": [
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "contents": [
+                                    {"type": "text", "text": "📅 日時", "size": "sm", "color": "#888888", "flex": 2},
+                                    {"type": "text", "text": display_date, "size": "sm", "weight": "bold", "color": "#333333", "flex": 5, "wrap": True},
+                                ],
+                                "margin": "lg",
+                            },
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "contents": [
+                                    {"type": "text", "text": "⏰ 時間", "size": "sm", "color": "#888888", "flex": 2},
+                                    {"type": "text", "text": time_slot, "size": "sm", "weight": "bold", "color": "#333333", "flex": 5},
+                                ],
+                                "margin": "md",
+                            },
+                            {
+                                "type": "box",
+                                "layout": "horizontal",
+                                "contents": [
+                                    {"type": "text", "text": "💻 形式", "size": "sm", "color": "#888888", "flex": 2},
+                                    {"type": "text", "text": "オンライン（Zoom）", "size": "sm", "weight": "bold", "color": "#333333", "flex": 5},
+                                ],
+                                "margin": "md",
+                            },
+                            {
+                                "type": "button",
+                                "action": {
+                                    "type": "uri",
+                                    "label": "🔗 Zoomに参加する",
+                                    "uri": "https://us02web.zoom.us/j/3751503981?pwd=RGRYdnlPTENNbkZlQUdOdTBQRENVQT09",
+                                },
+                                "style": "primary",
+                                "color": "#2D8CFF",
+                                "height": "sm",
+                                "margin": "lg",
+                            },
+                        ],
+                        "backgroundColor": "#f8f8f8",
+                        "cornerRadius": "10px",
+                        "paddingAll": "16px",
+                        "margin": "lg",
+                    },
+                    {"type": "text", "text": "確認のご連絡をお送りしますので\n少々お待ちください😊", "size": "sm", "color": "#555555", "wrap": True, "align": "center", "margin": "lg"},
+                ],
+                "paddingAll": "20px",
+            },
+        },
+    }
+
 # ─── セッション（メモリ）──────────────────────────────────────
-sessions = {}  # {user_id: {"step": int, "score": int}}
+sessions = {}  # {user_id: {"step": int, "score": int, "mode": str, "booking_date": str}}
 
 def get_session(user_id):
     if user_id not in sessions:
-        sessions[user_id] = {"step": 0, "score": 0}
+        sessions[user_id] = {"step": 0, "score": 0, "mode": "", "booking_date": ""}
     return sessions[user_id]
 
 def reset_session(user_id):
-    sessions[user_id] = {"step": 0, "score": 0}
+    sessions[user_id] = {"step": 0, "score": 0, "mode": "", "booking_date": ""}
 
 # ─── LINE API ─────────────────────────────────────────────────
 def reply(reply_token, messages):
@@ -293,16 +469,26 @@ def handle_event(event):
         text = event["message"]["text"].strip()
         session = get_session(user_id)
 
-        if text in ["診断", "AI診断", "スタート", "診断スタート"]:
+        if text in ["無料相談", "予約", "相談"]:
             reset_session(user_id)
             session = get_session(user_id)
+            session["mode"] = "booking"
+            reply(reply_token, [
+                {"type": "text", "text": "無料相談にご興味いただき\nありがとうございます😊\n\n宅配便の時間指定のように\nタップで日時をお選びください📦✨"},
+                make_date_picker_msg(),
+            ])
+
+        elif text in ["診断", "AI診断", "スタート", "診断スタート"]:
+            reset_session(user_id)
+            session = get_session(user_id)
+            session["mode"] = "quiz"
             reply(reply_token, [
                 {"type": "text", "text": "こんにちは！🤖\nあいかのAI活用レベル診断Botです✨\n\n7つの質問であなたのAI活用レベルを診断します！\nすべてタップで答えられるので、2〜3分で完了します😊\n\nでは早速はじめましょう！"},
                 make_question_msg(QUESTIONS[0]),
             ])
             session["step"] = 1
         else:
-            if session["step"] == 0:
+            if session["step"] == 0 and session.get("mode", "") == "":
                 reply(reply_token, [
                     {"type": "text", "text": "ご登録ありがとうございます🌿\n\n【環境再生型造園 オンライン実践講座】は\n現在準備中です。\n\n🚧 Coming Soon 🚧\n\n講座の詳細・募集開始のご案内は\nこちらのLINEで最速でお届けします。\n\n楽しみにお待ちください✨"},
                     {"type": "text", "text": "💡 AI活用レベル診断もできます！\n「診断スタート」と送ってみてください🤖"},
@@ -311,20 +497,54 @@ def handle_event(event):
     elif event_type == "postback":
         session = get_session(user_id)
         data = parse_qs(event["postback"]["data"])
-        score = int(data.get("score", ["0"])[0])
-        session["score"] += score
-        next_step = session["step"]
 
-        if next_step < len(QUESTIONS):
-            reply(reply_token, make_question_msg(QUESTIONS[next_step]))
-            session["step"] += 1
-        else:
-            lv = get_level(session["score"])
-            reply(reply_token, [
-                {"type": "text", "text": f"診断完了です！🎉\nあなたのスコアは {session['score']}/17点でした！\n\n結果をお届けします👇"},
-                make_result_flex(session["score"], lv),
-            ])
+        # ─── 無料相談：日付選択 ───
+        if "booking_date" in data:
+            selected_date = data["booking_date"][0]
+            session["booking_date"] = selected_date
+            session["mode"] = "booking"
+            reply(reply_token, make_time_picker_msg())
+
+        # ─── 無料相談：時間帯選択 → 予約確定 ───
+        elif "booking_time" in data:
+            selected_time = data["booking_time"][0]
+            booking_date = session.get("booking_date", "")
+            if not booking_date:
+                reply(reply_token, {"type": "text", "text": "もう一度「無料相談」と送ってください🙏"})
+                reset_session(user_id)
+                return
+
+            # ユーザーに確認メッセージ
+            reply(reply_token, make_booking_confirm_flex(booking_date, selected_time))
+
+            # CEOに通知（Push API）
+            d = datetime.strptime(booking_date, "%Y-%m-%d")
+            wd = WEEKDAY_JP[d.weekday()]
+            display_date = f"{d.year}年{d.month}月{d.day}日（{wd}）"
+            push_message(CEO_USER_ID, {
+                "type": "text",
+                "text": f"📩 新しい無料相談の予約が入りました！\n\n👤 ユーザーID: {user_id[:8]}...\n📅 日時: {display_date}\n⏰ 時間: {selected_time}\n\n確認連絡をお願いします🙏",
+            })
+
+            print(f"[BOOKING] user={user_id[:8]} date={booking_date} time={selected_time}", flush=True)
             reset_session(user_id)
+
+        # ─── 診断クイズ：回答処理 ───
+        elif "score" in data:
+            score = int(data.get("score", ["0"])[0])
+            session["score"] += score
+            next_step = session["step"]
+
+            if next_step < len(QUESTIONS):
+                reply(reply_token, make_question_msg(QUESTIONS[next_step]))
+                session["step"] += 1
+            else:
+                lv = get_level(session["score"])
+                reply(reply_token, [
+                    {"type": "text", "text": f"診断完了です！🎉\nあなたのスコアは {session['score']}/17点でした！\n\n結果をお届けします👇"},
+                    make_result_flex(session["score"], lv),
+                ])
+                reset_session(user_id)
 
 # ─── HTTP サーバー ────────────────────────────────────────────
 def verify_signature(body, signature):
